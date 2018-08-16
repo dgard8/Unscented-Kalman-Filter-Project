@@ -14,7 +14,7 @@ using std::vector;
  */
 UKF::UKF() {
   // if this is false, laser measurements will be ignored (except during init)
-  use_laser_ = false;
+  use_laser_ = true;
   
   // if this is false, radar measurements will be ignored (except during init)
   use_radar_ = true;
@@ -26,10 +26,10 @@ UKF::UKF() {
   P_ = MatrixXd(5, 5);
   
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 1.9;
+  std_a_ = 1.5;
   
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 0.75;
+  std_yawdd_ = M_PI/10.0;
   
   //DO NOT MODIFY measurement noise values below these are provided by the sensor manufacturer.
   // Laser measurement noise standard deviation position1 in m
@@ -50,10 +50,11 @@ UKF::UKF() {
 
   n_aug_ = 7;
   n_x_ = 5;
-  lambda_ = 3 - n_x_;
+  lambda_ = 3 - n_aug_;
   weights_ = VectorXd(2*n_aug_+1);
-  weights_.fill(1/(2 * (lambda_ + n_aug_)));
+  weights_.fill(0.5/(lambda_ + n_aug_));
   weights_(0) = lambda_/(lambda_ + n_aug_);
+  cout << weights_ << endl;
 }
 
 UKF::~UKF() {}
@@ -123,10 +124,6 @@ void UKF::Prediction(double delta_t) {
  * @param {MeasurementPackage} meas_package
  */
 void UKF::UpdateLidar(MeasurementPackage meas_package) {
-  /**
-   TODO:
-   You'll also need to calculate the lidar NIS.
-   */
   int n_z = 2; // lidar measures px and py
   MatrixXd Zsig = MatrixXd(n_z, 2 * n_aug_ + 1);
   
@@ -150,15 +147,10 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
  * @param {MeasurementPackage} meas_package
  */
 void UKF::UpdateRadar(MeasurementPackage meas_package) {
-  /**
-   TODO:
-   You'll also need to calculate the radar NIS.
-   */
-  
-  //transform sigma points into measurement space
   int n_z = 3; // radar measures r, phi, and phi_dot
   MatrixXd Zsig = MatrixXd(n_z, 2 * n_aug_ + 1);
   
+  //transform sigma points into measurement space
   for (int i=0; i<2 * n_aug_ + 1; i++){
     VectorXd originalPoint = Xsig_pred_.col(i);
     float px = originalPoint(0);
@@ -168,10 +160,9 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
     
     float p = sqrt(px*px + py*py);
     float theta = atan2(py,px);
-    float pdot = (px*cos(psi)*v+py*sin(psi)*v)/p;
+    float pdot = (px*cos(psi)*v + py*sin(psi)*v)/p;
     
     Zsig.col(i) << p, theta, pdot;
-    //cout << Zsig.col(i) << endl << endl;
   }
   
   MatrixXd measurmentNoise = MatrixXd(n_z,n_z);
@@ -189,7 +180,7 @@ void UKF::updateMeasurement(MatrixXd Zsig, MeasurementPackage meas_package, Matr
   //calculate mean predicted measurement
   VectorXd z_pred = VectorXd(n_z);
   z_pred.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //iterate over sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     z_pred = z_pred + weights_(i) * Zsig.col(i);
   }
   
@@ -199,7 +190,7 @@ void UKF::updateMeasurement(MatrixXd Zsig, MeasurementPackage meas_package, Matr
   MatrixXd Tc = MatrixXd(n_x_, n_z);
   Tc.fill(0.0);
   
-  for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //iterate over sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     
     VectorXd z_diff = Zsig.col(i) - z_pred;
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
@@ -221,11 +212,14 @@ void UKF::updateMeasurement(MatrixXd Zsig, MeasurementPackage meas_package, Matr
   //calculate Kalman gain K;
   MatrixXd K = Tc * S.inverse();
   
-  VectorXd zthing = z - z_pred;
-  float nis = zthing.transpose() * S.inverse() * zthing;
+  VectorXd z_diff = z - z_pred;
+  if (n_z == 3){
+    z_diff(1)=Tools::normalizeAngle(z_diff(1));
+  }
+  float nis = z_diff.transpose() * S.inverse() * z_diff;
   nisValues.push_back(nis);
   
-  x_ = x_ + K * (z - z_pred);
+  x_ = x_ + K * (z_diff);
   P_ = P_ - K * S * K.transpose();
 
 }
@@ -234,9 +228,6 @@ MatrixXd UKF::predictSigmaPoints(MatrixXd points, double delta_t){
   int n_aug = n_aug_;
   int n_x = n_x_;
   MatrixXd Xsig_pred = MatrixXd(n_x, 2 * n_aug + 1);
-  
-  
-  //cout << "delta t:" << delta_t << endl;
   
   for (int i=0; i<2 * n_aug + 1; i++){
     VectorXd original_point = points.col(i);
@@ -248,14 +239,11 @@ MatrixXd UKF::predictSigmaPoints(MatrixXd points, double delta_t){
     float tangential_acceleration = original_point(5);
     float angle_acceleration = original_point(6);
     
-    
-    //cout << "orig point" << original_point << endl;
-    
     original_point = VectorXd(n_x);
     original_point << px, py, v, psi, psidot;
     
     VectorXd movement = VectorXd(n_x);
-    if (psidot == 0){
+    if (fabs(psidot) < 0.001){
       movement(0) = v*cos(psi)*delta_t;
       movement(1) = v*sin(psi)*delta_t;
     }
@@ -282,15 +270,11 @@ MatrixXd UKF::predictSigmaPoints(MatrixXd points, double delta_t){
 }
 
 void UKF::updateState(MatrixXd predictedPoints){
-  
-  //predict state mean
   x_.fill(0.0);
-  for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //iterate over sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     x_ = x_ + weights_(i) * Xsig_pred_.col(i);
-    //cout << x_ << endl << endl;
   }
   
-  //predict state covariance matrix
   P_.fill(0.0);
   for (int i=0; i<2*n_aug_+1; i++){
     VectorXd x_diff = predictedPoints.col(i) - x_;
