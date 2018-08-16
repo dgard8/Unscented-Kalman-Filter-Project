@@ -37,6 +37,7 @@ int main()
   Tools tools;
   vector<VectorXd> estimations;
   vector<VectorXd> ground_truth;
+    cout << "begin" << endl; // for some reason it just hangs if I don't have this output?
 
   h.onMessage([&ukf,&tools,&estimations,&ground_truth](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -107,7 +108,7 @@ int main()
           
           //Call ProcessMeasurment(meas_package) for Kalman filter
     	  ukf.ProcessMeasurement(meas_package);
-            cout << Tools::percentageAbove(ukf.nisValues, 7.8) << endl;
+            //cout << Tools::percentageAbove(ukf.nisValues, 7.8) << endl;
 
     	  //Push the current estimated x,y positon from the Kalman filter's state vector
 
